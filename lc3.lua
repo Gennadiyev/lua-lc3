@@ -40,7 +40,6 @@ function utils.decToBase(n, b) -- Encodes a decimal to any base
     until n == 0
     return sign .. table.concat(t,""), t
 end
-    
 
 function utils.encode2sCompliment(dec, digits) -- Encodes a decimal to 2's complement
     if type(digits) ~= "number" or digits <= 1 or digits > 16 or floor(digits) ~= digits then
@@ -107,9 +106,12 @@ function LC3:new() -- Creates a new `lc-3` instance
             print("Writing memory out of bounds: " .. tostring(addr))
             return false
         end
-        if data ~= "number" or floor(data) ~= data or data < 0 then
+        if data ~= "number" or floor(data) ~= data then
             print("Data must be a in range 0x0000 ~ 0xffff, but received " .. tostring(data))
             return false
+        end
+        if data > 0xffff or data < 0x0000 then
+            data = utils.parse2sCompliment(utils.encode2sCompliment(data, 21):sub(-16, -1))
         end
         self[addr] = data
         return true
@@ -126,14 +128,102 @@ function LC3:new() -- Creates a new `lc-3` instance
             print("Register doesn't exist: " .. reg)
             return false
         end
-        if data ~= "number" or floor(data) ~= data or data < 0 then
+        if data ~= "number" or floor(data) ~= data then
             print("Data must be a in range 0x0000 ~ 0xffff, but received " .. tostring(data))
             return false
+        end
+        if data > 0xffff or data < 0x0000 then
+            data = utils.parse2sCompliment(utils.encode2sCompliment(data, 21):sub(-16, -1))
         end
         self[reg] = data
     end
     function lc3:step()
         self.IR = self:getMemory(self.PC)
+        self.PC = self.PC + 1
+        local s = self.IR
+        local s, t = utils.decToBase(s, 2) -- s = "0101010010100000", t = {'0', '1', '0', '1', ..., '0', '0'}
+        local opcode = s:sub(1, 4)
+        local function toReg(s)
+            return 'R'..tonumber(s, 2)
+        end
+        local function sub(str, id)
+            return str:sub(id, id)
+        end
+        local function updateCC(value)
+            if value < 0 then
+                self.CC = 'n'
+            elseif value == 0 then
+                self.CC = 'z'
+            elseif value > 0 then
+                self.CC = 'p'
+            end
+        end
+        if opcode == "0001" then
+            -- ADD
+            if sub(s, 11) == '0' then
+                -- ADD R1, R2, R3
+                local dst = toReg(s:sub(5, 7))
+                local src1 = toReg(s:sub(8, 10))
+                local src2 = toReg(s:sub(14, 16))
+                self:setRegister(dst, self:getRegister(src1) + self:getRegister(src2))
+                updateCC(self:getRegister(dst))
+            else
+                -- ADD R1, R2, #-1
+                local dst = toReg(s:sub(5, 7))
+                local src = toReg(s:sub(8, 10))
+                local imm = utils.parse2sCompliment(s:sub(12, 16))
+                self:setRegister(dst, self:getRegister(src1) + imm)
+                updateCC(self:getRegister(dst))
+            end
+        elseif opcode == "0101" then
+            -- AND
+
+        elseif opcode == "0000" then
+            -- BR
+
+        elseif opcode == "1100" then
+            -- JMP
+
+        elseif opcode == "0100" then
+            -- JSR / JSRR
+
+        elseif opcode == "0010" then
+            -- LD
+
+        elseif opcode == "1010" then
+            -- LDI
+
+        elseif opcode == "0110" then
+            -- LDR
+
+        elseif opcode == "1110" then
+            -- LEA
+
+        elseif opcode == "1001" then
+            -- NOT
+
+        elseif opcode == "1100" then
+            -- RET
+
+        elseif opcode == "1000" then
+            -- RTI
+
+        elseif opcode == "0011" then
+            -- ST
+
+        elseif opcode == "1011" then
+            -- STI
+
+        elseif opcode == "0111" then
+            -- STR
+
+        elseif opcode == "1111" then
+            -- TRAP
+
+        elseif opcode == "1101" then
+            -- Reserved
+
+        end
     end
     return lc3
 end
