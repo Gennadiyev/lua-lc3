@@ -44,7 +44,7 @@ function lc3utils.loadHexProgram(lc3, programString, pc) -- Load a program to lc
             lc3NewState:setMemory(pc + line - 1, s)
         end
     end
-    lc3 = lc3NewState
+    return lc3NewState
 end
 
 return lc3utils

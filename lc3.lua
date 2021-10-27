@@ -1,3 +1,8 @@
+if _G._VERSION ~= "Lua 5.4" and _G._VERSION ~= "Lua 5.3" then
+    print("LC-3 does not support lua version < 5.3")
+    return false
+end
+
 local floor,insert = math.floor, table.insert
 local LC3 = {}
 
@@ -42,7 +47,7 @@ function utils.decToBase(n, b) -- Encodes a decimal to any base
 end
 
 function utils.encode2sCompliment(dec, digits) -- Encodes a decimal to 2's complement
-    if type(digits) ~= "number" or digits <= 1 or digits > 16 or floor(digits) ~= digits then
+    if type(digits) ~= "number" or digits <= 1 or digits > 32 or floor(digits) ~= digits then
         print("Cannot encode number to invalid digit count: "..tostring(digits))
         return false
     end
@@ -106,42 +111,43 @@ function LC3:new() -- Creates a new `lc-3` instance
             print("Writing memory out of bounds: " .. tostring(addr))
             return false
         end
-        if data ~= "number" or floor(data) ~= data then
+        if type(data) ~= "number" or floor(data) ~= data then
             print("Data must be a in range 0x0000 ~ 0xffff, but received " .. tostring(data))
             return false
         end
         if data > 0xffff or data < 0x0000 then
             data = utils.parse2sCompliment(utils.encode2sCompliment(data, 21):sub(-16, -1))
         end
-        self[addr] = data
+        self[addr] = floor(data)
         return true
     end
     function lc3:getRegister(reg)
         if type(reg) ~= "string" or not(self[reg]) then
-            print("Register doesn't exist: " .. reg)
+            print("Register doesn't exist: " .. tostring(reg))
             return false
         end
         return self[reg]
     end
     function lc3:setRegister(reg, data)
         if type(reg) ~= "string" or not(self[reg]) then
-            print("Register doesn't exist: " .. reg)
+            print("Register doesn't exist: " .. tostring(reg))
             return false
         end
-        if data ~= "number" or floor(data) ~= data then
+        if type(data) ~= "number" or floor(data) ~= data then
             print("Data must be a in range 0x0000 ~ 0xffff, but received " .. tostring(data))
             return false
         end
         if data > 0xffff or data < 0x0000 then
             data = utils.parse2sCompliment(utils.encode2sCompliment(data, 21):sub(-16, -1))
         end
-        self[reg] = data
+        self[reg] = floor(data)
     end
     function lc3:step()
         self.IR = self:getMemory(self.PC)
         self.PC = self.PC + 1
         local s = self.IR
         local s, t = utils.decToBase(s, 2) -- s = "0101010010100000", t = {'0', '1', '0', '1', ..., '0', '0'}
+        s = string.rep('0', 16 - #s) .. s
         local opcode = s:sub(1, 4)
         local function toReg(s)
             return 'R'..tonumber(s, 2)
@@ -150,11 +156,13 @@ function LC3:new() -- Creates a new `lc-3` instance
             return str:sub(id, id)
         end
         local function updateCC(value)
-            if value < 0 then
+            print(value)
+            local seg = 0x7fff
+            if value > seg then
                 self.CC = 'n'
             elseif value == 0 then
                 self.CC = 'z'
-            elseif value > 0 then
+            else
                 self.CC = 'p'
             end
         end
@@ -165,22 +173,42 @@ function LC3:new() -- Creates a new `lc-3` instance
                 local dst = toReg(s:sub(5, 7))
                 local src1 = toReg(s:sub(8, 10))
                 local src2 = toReg(s:sub(14, 16))
-                self:setRegister(dst, self:getRegister(src1) + self:getRegister(src2))
+                local res = self:getRegister(src1) + self:getRegister(src2)
+                self:setRegister(dst, res)
                 updateCC(self:getRegister(dst))
             else
                 -- ADD R1, R2, #-1
                 local dst = toReg(s:sub(5, 7))
                 local src = toReg(s:sub(8, 10))
                 local imm = utils.parse2sCompliment(s:sub(12, 16))
-                self:setRegister(dst, self:getRegister(src1) + imm)
+                local res = self:getRegister(src) + imm
+                self:setRegister(dst, res)
                 updateCC(self:getRegister(dst))
             end
         elseif opcode == "0101" then
             -- AND
-
+            if sub(s, 11) == '0' then
+                -- ADD R1, R2, R3
+                local dst = toReg(s:sub(5, 7))
+                local src1 = toReg(s:sub(8, 10))
+                local src2 = toReg(s:sub(14, 16))
+                local res = self:getRegister(src1) & self:getRegister(src2)
+                self:setRegister(dst, res)
+                updateCC(self:getRegister(dst))
+            else
+                -- ADD R1, R2, #-1
+                local dst = toReg(s:sub(5, 7))
+                local src = toReg(s:sub(8, 10))
+                local imm = utils.parse2sCompliment(s:sub(12, 16))
+                local res = self:getRegister(src) & imm
+                self:setRegister(dst, res)
+                updateCC(self:getRegister(dst))
+            end
         elseif opcode == "0000" then
             -- BR
-
+            if (sub(s, 5) == '1' and self.CC == 'n') or (sub(s, 6) == '1' and self.CC == 'z') or (sub(s, 7) == '1' and self.CC == 'p') then
+                self.PC = self.PC + utils.parse2sCompliment(s:sub(8, 16))
+            end
         elseif opcode == "1100" then
             -- JMP
 
@@ -195,13 +223,26 @@ function LC3:new() -- Creates a new `lc-3` instance
 
         elseif opcode == "0110" then
             -- LDR
-
+            local baseR = toReg(s:sub(8, 10))
+            local dst = toReg(s:sub(5, 7))
+            local offset = utils.parse2sCompliment(s:sub(11, 16))
+            local mem = self:getMemory(self:getRegister(baseR) + offset)
+            self:setRegister(dst, mem)
+            updateCC(self:getRegister(dst))
         elseif opcode == "1110" then
             -- LEA
-
+            local offset = utils.parse2sCompliment(s:sub(8, 16))
+            local dst = toReg(s:sub(5, 7))
+            local res = self.PC + offset
+            self:setRegister(dst, res)
+            updateCC(self:getRegister(dst))
         elseif opcode == "1001" then
             -- NOT
-
+            local dst = toReg(s:sub(5, 7))
+            local src = toReg(s:sub(8, 10))
+            local res = tonumber(0xffff - self:getRegister(src))
+            self:setRegister(dst, res)
+            updateCC(self:getRegister(dst))
         elseif opcode == "1100" then
             -- RET
 
@@ -210,22 +251,49 @@ function LC3:new() -- Creates a new `lc-3` instance
 
         elseif opcode == "0011" then
             -- ST
-
+            local src = toReg(s:sub(5, 7))
+            local offset = utils.parse2sCompliment(s:sub(8, 16))
+            local res = self:getMemory(src)
+            self:setMemory(self.PC + offset, res)
         elseif opcode == "1011" then
             -- STI
-
+            local src = toReg(s:sub(5, 7))
+            local offset = utils.parse2sCompliment(s:sub(8, 16))
+            local res = self:getRegister(src)
+            local addr = self:getMemory(self.PC + offset)
+            self:setMemory(addr, res)
         elseif opcode == "0111" then
             -- STR
 
         elseif opcode == "1111" then
             -- TRAP
-
+            local trapvec = utils.parse2sCompliment(s:sub(9, 16))
+            if trapvec == 0x25 then
+                print("Program halted")
+                os.exit()
+            end
         elseif opcode == "1101" then
             -- Reserved
 
         end
     end
+    function lc3:getState()
+        return {
+            R0 = self.R0,
+            R1 = self.R1,
+            R2 = self.R2,
+            R3 = self.R3,
+            R4 = self.R4,
+            R5 = self.R5,
+            R6 = self.R6,
+            R7 = self.R7,
+            PC = self.PC,
+            IR = self.IR,
+            PSR= self.PSR,
+            CC = self.CC
+        }
+    end
     return lc3
 end
 
-return LC3
+return LC3, utils
